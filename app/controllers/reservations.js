@@ -4,10 +4,23 @@ class Reservations {
     static async createReservation(req, res) {
         const model = new ReservationsModel();
         if (model.validate(req.body)) {
+            let conflict = await model.isConflict();
+
+            if (conflict instanceof Error) {
+                return res.status(500).send();
+            }
+
+
+            if (conflict) {
+                return res.status(409).send();
+            }
+
             let result = await model.save();
+
             if (result instanceof Error) {
                 return res.status(500).send();
             }
+
             if (result) {
                 return res.set('Location', `api/reservations/${model.id}`).status(201).send();
             }
@@ -17,7 +30,7 @@ class Reservations {
 
     static async getReservationInfo(req, res) {
         const model = new ReservationsModel();
-        if (!model.validateId(req.params.reservation_id)) {
+        if (!req.params.reservation_id || !model.validateId(req.params.reservation_id)) {
             return res.status(400).send();
         }
 
@@ -28,7 +41,7 @@ class Reservations {
         }
 
         if (result) {
-            return res.status(201).send(result);
+            return res.status(200).send(result);
         }
 
         return res.status(404).send();
@@ -47,29 +60,29 @@ class Reservations {
                 return res.status(500).send();
             }
 
-            if (result) {
-                let conflict = await model.isUpdateConflict();
-
-                if (conflict instanceof Error) {
-                    return res.status(500).send();
-                }
-
-                if (conflict) {
-                    return res.status(409).send();
-                }
-
-                let updateResult = await model.update();
-
-                if (updateResult instanceof Error) {
-                    return res.status(500).send();
-                }
-
-                if (result) {
-                    return res.set('Location', `api/reservations/${model.id}`).status(200).send();
-                }
+            if (!result) {
+                return res.status(404).send();
             }
 
-            return res.status(404).send();
+            let conflict = await model.isConflict();
+
+            if (conflict instanceof Error) {
+                return res.status(500).send();
+            }
+
+            if (conflict) {
+                return res.status(409).send();
+            }
+
+            let updateResult = await model.update();
+
+            if (updateResult instanceof Error) {
+                return res.status(500).send();
+            }
+
+            if (updateResult) {
+                return res.set('Location', `api/reservations/${model.id}`).status(200).send();
+            }
         }
 
         return res.status(400).send();

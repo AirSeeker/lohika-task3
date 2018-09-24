@@ -1,3 +1,5 @@
+/coverage
+.nyc-output
 .idea
 # Logs
 logs

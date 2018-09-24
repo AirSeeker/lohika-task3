@@ -15,12 +15,12 @@ class ReservationsModel {
     }
 
     /**
-     * Validate view,delete,update request params
-     * @param id
+     * Validate view, delete, update request id params on success set model id
+     * @param {number} id
      * @returns {boolean}
      */
     validateId(id) {
-        const schema = Joi.number().integer().required();
+        const schema = Joi.number().integer().min(1).required();
         let {value: result, error} = Joi.validate(id, schema);
 
         if (error === null) {
@@ -32,8 +32,8 @@ class ReservationsModel {
     }
 
     /**
-     * Validate create and update request body
-     * @param data
+     * Validate create and update request body on success set model guests, time, reservationEnd
+     * @param {Object} data
      * @returns {boolean}
      */
     validate(data) {
@@ -53,10 +53,15 @@ class ReservationsModel {
             this.duration = result.reservation.duration;
             let duration = `${this.duration}`.split('.');
             let hours = parseInt(duration[0]);
-            let minutes = 60 / parseInt(duration[1]) || 0;
-            this.reservationEnd = moment(this.time, 'YYYY-MM-DDTHH:mm:ssZ').utc()
-                .add(hours, 'h').add(minutes, 'm')
-                .format('YYYY-MM-DDTHH:mm:ssZ');
+            let minutes = 0;
+            if (duration[1]) {
+                minutes = 60 / (1 / parseFloat('0.' + duration[1]));
+            }
+            this.reservationEnd = moment(this.time, 'YYYY-MM-DDTHH:mm:ssZ').utc().add(hours, 'h');
+            if (minutes) {
+                this.reservationEnd.add(minutes, 'm')
+            }
+            this.reservationEnd = this.reservationEnd.format('YYYY-MM-DDTHH:mm:ssZ');
             return true;
         }
 
@@ -67,38 +72,38 @@ class ReservationsModel {
      * Search for available tables return true if exists
      * @returns {Promise<*>}
      */
-    async isUpdateConflict() {
+    async isConflict() {
         const freeTables = await this.getFreeTables(this.id);
 
         if (freeTables instanceof Error) {
             return freeTables;
         }
 
-        return !!freeTables.length;
+        return !freeTables.length;
     }
 
     /**
      * Return free tables
-     * @param {number} [excludeReservationId]
+     * @param {number} [excludeReservationId] On update need to exclude current id
      * @returns {Promise<*>}
      */
     async getFreeTables(excludeReservationId) {
         let result;
         try {
-            const subquery = knex('reservations')
-                .andWhereBetween('reservations.start', [this.time, this.reservationEnd])
-                .orWhereBetween('reservations.end', [this.time, this.reservationEnd])
+            const subQuery = knex('reservations')
                 .modify(function (queryBuilder) {
                     if (excludeReservationId) {
-                        queryBuilder.where('reservations.id', '!=', excludeReservationId);
+                        queryBuilder.andWhere('reservations.id', '!=', excludeReservationId);
                     }
                 })
+                .andWhereBetween('reservations.start', [this.time, this.reservationEnd])
+                .orWhereBetween('reservations.end', [this.time, this.reservationEnd])
                 .select('table_id');
+
             result = await knex('tables')
                 .where('capacity', '>=', this.guests)
-                .andWhere('id', 'not in', subquery);
+                .andWhere('id', 'not in', subQuery);
         } catch (e) {
-            console.log(e.message);
             return new Error(e.message);
         }
         this.freeTables = result;
@@ -125,8 +130,7 @@ class ReservationsModel {
                 return new Error(e.message);
             }
 
-            if (reservation.length) {
-                this.id = reservation[0];
+            if (reservation) {
                 return true;
             }
         }
@@ -134,25 +138,24 @@ class ReservationsModel {
         return false;
     }
 
+    /**
+     * Save reservation
+     * @returns {Promise<*>}
+     */
     async save() {
-        const freeTables = await this.getFreeTables();
-        if (freeTables instanceof Error) {
-            return freeTables;
-        }
-        if (freeTables.length) {
+        if (this.freeTables.length) {
             let reservation;
             try {
                 reservation = await knex('reservations')
                     .returning('id')
                     .insert({
-                        table_id: freeTables[0].id,
+                        table_id: this.freeTables[0].id,
                         start: this.time,
                         end: this.reservationEnd,
                         guests: this.guests
                     });
             } catch (e) {
                 return new Error(e.message);
-
             }
 
             if (reservation.length) {
@@ -184,19 +187,19 @@ class ReservationsModel {
                 .join('tables', 'tables.id', 'reservations.table_id')
                 .limit(1);
         } catch (e) {
-            console.log(e.message);
             return new Error(e.message);
         }
 
         if (!result.length) {
             return false;
         }
+
         return {
             reservation: {
                 id: result[0].id,
                 guests: result[0].guests,
-                start: result[0].start,
-                end: result[0].end,
+                start: moment(result[0].start, 'YYYY-MM-DDTHH:mm:ssZ').utc().format('YYYY-MM-DDTHH:mm:ssZ'),
+                end: moment(result[0].end, 'YYYY-MM-DDTHH:mm:ssZ').utc().format('YYYY-MM-DDTHH:mm:ssZ'),
                 table: {
                     number: result[0].number,
                     capacity: result[0].capacity
@@ -212,13 +215,12 @@ class ReservationsModel {
     async deleteOne() {
         let result;
         try {
-            result = !await knex('reservations').where('id', this.id).del();
+            result = await knex('reservations').where('id', this.id).del();
         } catch (e) {
-            console.log(e.message);
             return new Error(e.message);
         }
 
-        return !result;
+        return !!result;
     }
 }
 

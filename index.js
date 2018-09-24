@@ -14,6 +14,8 @@ app.use(function (req, res, next) {
 
 app.use('/api', reservationsRoutes);
 
-app.listen(8080, () => {
+const server = app.listen(8080, () => {
     console.log('App is running on port 8080');
 });
+
+module.exports = server;
